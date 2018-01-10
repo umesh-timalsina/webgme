@@ -8,7 +8,7 @@
 define([
     'js/logger',
     'module',
-    'AutoRouterActionApplier',
+    'AutoRouterActionApplierOld',
     './ConnectionRouteManager2',
     'js/Utils/SaveToDisk'
 ], function (Logger,
@@ -38,7 +38,7 @@ define([
 
             currentDir.pop();
             currentDir = currentDir.join('/');
-            workerFile = currentDir + '/AutoRouter.Worker.js';
+            workerFile = currentDir + '/AutoRouter.WorkerOld.js';
 
             this.worker = new Worker(workerFile);
             this.worker.postMessage([WebGMEGlobal.gmeConfig.client]);
@@ -75,12 +75,9 @@ define([
 
     ConnectionRouteManager3.prototype._invokeAutoRouterMethod = function () {
         var array = Array.prototype.slice.call(arguments),  // Remove the extra 'arguments' stuff
-            methodName = array[0],
-            args = array[1],
             id;
 
-        console.log('post:', methodName, args);
-
+        console.log('post:', array[0], array[1]);
         if (this.workerReady) {
             this.worker.postMessage(array);
         } else {
@@ -88,11 +85,11 @@ define([
         }
 
         // Update some record keeping
-        switch (methodName) {
+        switch (array[0]) {
             case 'addPath':
 
-            case 'setBox':
-                id = args[1];
+            case 'addBox':
+                id = array[1][1];
                 this._onItemCreateQueue[id] = [];
                 break;
 
@@ -101,7 +98,7 @@ define([
                 break;
 
             case 'remove':
-                id = args[1];
+                id = array[1][1];
                 delete this._onItemCreateQueue[id];
                 break;
         }
@@ -116,6 +113,8 @@ define([
      */
     ConnectionRouteManager3.prototype._handleWorkerResponse = function (data) {
         var response = data.data;
+
+        console.log('response', response[0], response);
 
         if (response === 'READY') {
             this._processQueue();
@@ -136,15 +135,15 @@ define([
                 case 'routePaths':
                     var paths = response[1];
                     for (var i = paths.length; i--;) {
-                        this._renderConnection.apply(this, [paths[i].id, paths[i].points]);
+                        this._renderConnection.apply(this, paths[i]);
                     }
                     break;
 
-                case 'setPath':
+                case 'addPath':
                     // Set the collection to store it then fall through
                     // to create the promise in the 'addBox' method
                     collection = '_autorouterPaths';  // jshint ignore:line
-                case 'setBox':
+                case 'addBox':
                     // Record the item
                     id = response[1][1];
                     this[collection][id] = response[2];
@@ -196,7 +195,7 @@ define([
         this._onComponentCreate = function (_canvas, ID) {
             if (self._onItemCreateQueue[ID] === undefined) {  // New item
                 if (self.diagramDesigner.itemIds.indexOf(ID) !== -1) {
-                    self.insertComponent(ID);
+                    self.insertBox(ID);
                 } else if (self.diagramDesigner.connectionIds.indexOf(ID) !== -1) {
                     self.insertConnection(ID);
                 }
@@ -212,7 +211,7 @@ define([
                 self._modifyItem(ID.ID, resizeFn);
             } else {
                 self.logger.warn('Received ITEM_SIZE_CHANGED event for nonexistent item! (' + ID.ID + ')');
-                self.insertComponent(ID.ID);
+                self.insertBox(ID.ID);
             }
         };
         this.diagramDesigner.addEventListener(this.diagramDesigner.events.ITEM_SIZE_CHANGED, this._onComponentResize);
@@ -329,12 +328,11 @@ define([
      *
      * @param {ConnectionId} id
      * @param {Array<Points>} points
+     * @return {undefined}
      */
     ConnectionRouteManager3.prototype._renderConnection = function (id, points) {
         if (this.diagramDesigner.items[id]) {  // Only render if the box still exists
-            this.diagramDesigner.items[id].setConnectionRenderData(points.map(function (xyArr) {
-                return { x: xyArr[0], y: xyArr[1] };
-            }));
+            this.diagramDesigner.items[id].setConnectionRenderData(points);
         }
     };
 
@@ -348,25 +346,17 @@ define([
     };
 
     ConnectionRouteManager3.prototype._initializeGraph = function () {
+        /*
+         * In this method, we will update the boxes using the canvas.itemIds list and
+         * add any ports as needed (from the canvas.connectionIds)
+         */
         var canvas = this.diagramDesigner,
             connIdList = canvas.connectionIds,
             itemIdList = canvas.itemIds,
-            subComponents = canvas._itemSubcomponentsMap,
-            subComponentMapIds = Object.keys(canvas._itemSubcomponentsMap),
-            i = itemIdList.length,
-            j;
+            i = itemIdList.length;
 
         while (i--) {
-            this.insertComponent(itemIdList[i]);
-        }
-
-        i = subComponentMapIds.length;
-
-        while (i--) {
-            j = subComponents[subComponentMapIds[i]].length;
-            while (j--) {
-                this.insertSubComponent(subComponentMapIds[i], subComponents[subComponentMapIds[i]][j]);
-            }
+            this.insertBox(itemIdList[i]);
         }
 
         i = connIdList.length;
@@ -412,37 +402,33 @@ define([
         dstSubCompId = canvas.connectionEndIDs[connId].dstSubCompId;
         sId = srcSubCompId ? srcObjId + DESIGNERITEM_SUBCOMPONENT_SEPARATOR + srcSubCompId : srcObjId;
         tId = dstSubCompId ? dstObjId + DESIGNERITEM_SUBCOMPONENT_SEPARATOR + dstSubCompId : dstObjId;
+        connMetaInfo = canvas.items[connId].getMetaInfo();
+        srcConnAreas = canvas.items[srcObjId].getConnectionAreas(srcSubCompId, false, connMetaInfo);
+        dstConnAreas = canvas.items[dstObjId].getConnectionAreas(dstSubCompId, true, connMetaInfo);
+        srcPorts = {};
+        dstPorts = {};
 
-        this._invokeAutoRouterMethod('setPath', [connId, sId, tId]);
+        this._updatePort(srcObjId, srcSubCompId);//Adding ports for connection
+        this._updatePort(dstObjId, dstSubCompId);
 
-        // connMetaInfo = canvas.items[connId].getMetaInfo();
-        // srcConnAreas = canvas.items[srcObjId].getConnectionAreas(srcSubCompId, false, connMetaInfo);
-        // dstConnAreas = canvas.items[dstObjId].getConnectionAreas(dstSubCompId, true, connMetaInfo);
-        // srcPorts = {};
-        // dstPorts = {};
-        //
-        // this._updatePort(srcObjId, srcSubCompId);//Adding ports for connection
-        // this._updatePort(dstObjId, dstSubCompId);
-        //
-        // //Get available ports for this connection
-        // j = srcConnAreas.length;
-        // while (j--) {
-        //     srcPorts[srcConnAreas[j].id] = sId;
-        // }
-        //
-        // j = dstConnAreas.length;
-        // while (j--) {
-        //     dstPorts[dstConnAreas[j].id] = tId;
-        // }
-        //
-        // // If it has both a src and dst
-        // if (srcPorts.length !== 0 && dstPorts.length !== 0) {
-        //     this._invokeAutoRouterMethod('addPath',
-        //         [{src: srcPorts, dst: dstPorts}, connId]);
-        // }
+        //Get available ports for this connection
+        j = srcConnAreas.length;
+        while (j--) {
+            srcPorts[srcConnAreas[j].id] = sId;
+        }
+
+        j = dstConnAreas.length;
+        while (j--) {
+            dstPorts[dstConnAreas[j].id] = tId;
+        }
+
+        // If it has both a src and dst
+        if (srcPorts.length !== 0 && dstPorts.length !== 0) {
+            this._invokeAutoRouterMethod('addPath',
+                [{src: srcPorts, dst: dstPorts}, connId]);
+        }
 
         //Set custom points, if applicable
-        // TODO: Map to 'setCustomRouting'
         if (canvas.items[connId].segmentPoints.length > 0) {
             var conn = canvas.items[connId],
                 customPoints = conn.segmentPoints.slice();
@@ -452,55 +438,41 @@ define([
 
     };
 
-    ConnectionRouteManager3.prototype.insertComponent = function (objId) {
+    ConnectionRouteManager3.prototype.insertBox = function (objId) {
         var canvas = this.diagramDesigner,
             designerItem,
             areas,
             bBox,
-            i;
+            boxdefinition,
+            isEnd,
+            j = 0;
 
         designerItem = canvas.items[objId];
         bBox = designerItem.getBoundingBox();
+        areas = designerItem.getConnectionAreas(objId, isEnd) || [];
 
-        this._invokeAutoRouterMethod('setBox', [objId, {
-            x1: bBox.x,
-            y1: bBox.y,
-            x2: bBox.x2,
-            y2: bBox.y2
-        }]);
+        boxdefinition = {
+            //BOX
+            'x1': bBox.x,
+            'y1': bBox.y,
+            'x2': bBox.x2,
+            'y2': bBox.y2,
 
-        areas = designerItem.getConnectionAreas(objId) || [];
+            //PORTS
+            'ports': []
+        };
 
-        for (i = 0; i < areas.length; i += 1) {
-            this._invokeAutoRouterMethod('setPort', [objId, areas[i].id, {
-                x1: areas[i].x1,
-                y1: areas[i].y1,
-                x2: areas[i].x2,
-                y2: areas[i].y2
-            }]);
+        while (j < areas.length) {
+            //Building up the ports object
+            boxdefinition.ports.push({
+                'id': areas[j].id, 'area': [[areas[j].x1, areas[j].y1], [areas[j].x2, areas[j].y2]],
+                'angles': [areas[j].angle1, areas[j].angle2]
+            });
+            j++;
         }
 
-        //FIXME: Does this even work?
+        this._invokeAutoRouterMethod('addBox', [boxdefinition, objId]);
         this._autorouterBoxRotation[objId] = canvas.items[objId].rotation;
-    };
-
-    ConnectionRouteManager3.prototype.insertSubComponent = function (objId, subCompId) {
-        var portInfo = this._createPortInfo(objId, subCompId),
-            longId = objId + DESIGNERITEM_SUBCOMPONENT_SEPARATOR + subCompId,
-            i;
-
-        this._invokeAutoRouterMethod('setBox', [longId, {
-            x1: portInfo.x1,
-            y1: portInfo.y1,
-            x2: portInfo.x2,
-            y2: portInfo.y2
-        }]);
-
-        for (i = 0; i < portInfo.ports.length; i += 1) {
-            this._invokeAutoRouterMethod('setPort', [longId, portInfo.ports[i].id, portInfo.ports[i].area]);
-        }
-
-        this._invokeAutoRouterMethod('setDependentBox', [objId, longId]);
     };
 
     ConnectionRouteManager3.prototype.deleteItem = function (objId) {
@@ -548,25 +520,25 @@ define([
 
     };
 
-    // ConnectionRouteManager3.prototype._updatePort = function (objId, subCompId) {
-    //     var longid = objId + DESIGNERITEM_SUBCOMPONENT_SEPARATOR + subCompId,
-    //         newBox,
-    //         updateBoxFn;
-    //
-    //     if (subCompId !== undefined) { //Updating a port
-    //         // We need to know if the box even exists...
-    //         if (this._onItemCreateQueue[longid] === undefined) {  // If the port doesn't exist, create it
-    //             this._createPort(objId, subCompId);
-    //         } else {
-    //             // TODO Adjust size, connection info
-    //             newBox = this._createPortInfo(objId, subCompId);
-    //             updateBoxFn = this._invokeAutoRouterMethod.bind(this, 'setBoxRect', [longid, newBox]);
-    //             this._modifyItem(longid, updateBoxFn);
-    //         }
-    //     } else { // Updating the box's connection areas
-    //         this._modifyItem(objId, this._updateBoxConnectionAreas.bind(this, objId));
-    //     }
-    // };
+    ConnectionRouteManager3.prototype._updatePort = function (objId, subCompId) {
+        var longid = objId + DESIGNERITEM_SUBCOMPONENT_SEPARATOR + subCompId,
+            newBox,
+            updateBoxFn;
+
+        if (subCompId !== undefined) { //Updating a port
+            // We need to know if the box even exists...
+            if (this._onItemCreateQueue[longid] === undefined) {  // If the port doesn't exist, create it
+                this._createPort(objId, subCompId);
+            } else {
+                // TODO Adjust size, connection info
+                newBox = this._createPortInfo(objId, subCompId);
+                updateBoxFn = this._invokeAutoRouterMethod.bind(this, 'setBoxRect', [longid, newBox]);
+                this._modifyItem(longid, updateBoxFn);
+            }
+        } else { // Updating the box's connection areas
+            this._modifyItem(objId, this._updateBoxConnectionAreas.bind(this, objId));
+        }
+    };
 
     /**
      * Call a function on an item which may or may not exist yet
@@ -622,13 +594,13 @@ define([
         }
     };
 
-    // ConnectionRouteManager3.prototype._createPort = function (objId, subCompId) {
-    //     var longid = objId + DESIGNERITEM_SUBCOMPONENT_SEPARATOR + subCompId,
-    //         newBox = this._createPortInfo(objId, subCompId);
-    //
-    //     this._invokeAutoRouterMethod('addBox', [newBox, longid]);
-    //     this._invokeAutoRouterMethod('setComponent', [objId, longid]);
-    // };
+    ConnectionRouteManager3.prototype._createPort = function (objId, subCompId) {
+        var longid = objId + DESIGNERITEM_SUBCOMPONENT_SEPARATOR + subCompId,
+            newBox = this._createPortInfo(objId, subCompId);
+
+        this._invokeAutoRouterMethod('addBox', [newBox, longid]);
+        this._invokeAutoRouterMethod('setComponent', [objId, longid]);
+    };
 
     ConnectionRouteManager3.prototype._createPortInfo = function (objId, subCompId) {
         //Ports will now be a subcomponent
@@ -643,11 +615,11 @@ define([
             areas = canvas.items[objId].getConnectionAreas(subCompId, true, connectionMetaInfo) || [],
             j = areas.length,
             newBox = {
-                x1: null,
-                x2: null,
-                y1: null,
-                y2: null,
-                ports: []
+                'x1': null,
+                'x2': null,
+                'y1': null,
+                'y2': null,
+                'ports': []
             };
 
         while (j--) {
@@ -658,14 +630,8 @@ define([
                 y2 = Math.max(areas[j].y1, areas[j].y2);
 
             newBox.ports.push({
-                id: areas[j].id,
-                area: {
-                    x1: x1,
-                    x2: x2,
-                    y1: y1,
-                    y2: y2
-                },
-                angles: angles
+                'id': areas[j].id, 'area': [[x1, y1], [x2, y2]],
+                'angles': angles
             });
 
             if (angles) {

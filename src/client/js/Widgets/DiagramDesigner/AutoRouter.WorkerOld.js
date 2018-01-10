@@ -28,7 +28,7 @@ var startWorker = function() {
             client: '/client',
             underscore: '../../../bower_components/underscore/underscore-min',
             debug: '/common/lib/debug/debug',
-            AutoRouterActionApplier: '../../../lib/autorouter/action-applier' // create a map file for debugging
+            AutoRouterActionApplier: '../../../lib/autorouterOld/action-applier.min' // create a map file for debugging
         },
         shim: {
             debug: {
@@ -55,8 +55,9 @@ var startWorker = function() {
 
             this.respondTo = {
                 getPathPoints: true,
-                setBox: true,
-                setPath: true
+                routePaths: true,
+                addBox: true,
+                addPath: true
             };
         };
 
@@ -80,17 +81,14 @@ var startWorker = function() {
             }
 
             try {
-                console.log(action);
                 result = this._invokeAutoRouterMethodUnsafe.apply(this, msg);
             } catch(e) {
                 // Send error message
-                console.error(action, e);
                 worker.postMessage(['BugReplayList', this._getActionSequence()]);
             }
 
-            if (respondToAll || (this.respondTo[action] && result)) {
-                response.push(result);
-                console.log(response);
+            response.push(result);
+            if (respondToAll || this.respondTo[action]) {
                 this.logger.debug('Response:', response);
                 worker.postMessage(response);
             }
@@ -103,16 +101,17 @@ var startWorker = function() {
          */
         AutoRouterWorker.prototype._updatePaths = function(paths) {
             this.logger.debug('Updating paths');
-            var self = this,
-                id,
+            var id,
                 points,
                 content = [],
                 msg = ['routePaths', null];
 
-            msg[1] = paths.map(function (path) {
-                return self._invokeAutoRouterMethod('path', [path.id]);
-            });
-
+            for (var i = paths.length; i--;) {
+                id = this._arPathId2Original[paths[i].id];
+                points = this._invokeAutoRouterMethod('getPathPoints', [id]);
+                content.push([id, points]);
+            }
+            msg[1] = content;
             worker.postMessage(msg);
         };
 

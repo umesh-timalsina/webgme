@@ -19,6 +19,13 @@ define([], function () {
         this._itemSubcomponentsMap[objID] = this._itemSubcomponentsMap[objID] || [];
         this._itemSubcomponentsMap[objID].push(sCompID);
 
+        //if there is connection draw or redraw, let the connection manager know about the deletion
+        this.dispatchEvent(this.events.ON_REGISTER_SUBCOMPONENT, {
+            objectID: objID,
+            subComponentID: sCompID,
+
+        });
+
         if (_.isFunction(this.onRegisterSubcomponent)) {
             this.onRegisterSubcomponent(objID, sCompID, metaInfo);
         }

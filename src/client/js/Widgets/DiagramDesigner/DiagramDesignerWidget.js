@@ -22,6 +22,7 @@ define([
     './ConnectionRouteManagerBasic',
     './ConnectionRouteManager2',
     './ConnectionRouteManager3',
+    './ConnectionRouteManager3Old',
     './ConnectionDrawingManager',
     './DiagramDesignerWidget.EventDispatcher',
     './DiagramDesignerWidget.Zoom',
@@ -52,6 +53,7 @@ define([
              ConnectionRouteManagerBasic,
              ConnectionRouteManager2,
              ConnectionRouteManager3,
+             ConnectionRouteManager3Old,
              ConnectionDrawingManager,
              DiagramDesignerWidgetEventDispatcher,
              DiagramDesignerWidgetZoom,
@@ -73,7 +75,8 @@ define([
     var DiagramDesignerWidget,
         CANVAS_EDGE = 100,
         WIDGET_CLASS = 'diagram-designer',  // must be same as scss/Widgets/DiagramDesignerWidget.scss
-        GUID_DIGITS = 6,
+        MAX_COMPONENT_ID = 1000000, // This must be a power of 10
+        COMPONENT_ID_LENGTH = (MAX_COMPONENT_ID - 1).toString().length,
         BACKGROUND_TEXT_COLOR = '#DEDEDE',
         AUTO_ROUTER_MARGIN = 15,
         BACKGROUND_TEXT_SIZE = 30,
@@ -86,7 +89,7 @@ define([
         gridSize: 10,
         droppable: true,
         zoomUIControls: true,
-        defaultConnectionRouteManagerType: WebGMEGlobal.gmeConfig.client.defaultConnectionRouter
+        defaultConnectionRouteManagerType: 'basic'
     };
 
     DiagramDesignerWidget = function (container, par) {
@@ -230,15 +233,16 @@ define([
         /*********** CONNECTION DRAWING COMPONENT *************/
         this._defaultConnectionRouteManagerType = params.defaultConnectionRouteManagerType;
         //initiate Connection Router (if needed)
-        if (params.connectionRouteManager) {
-            this.connectionRouteManager = params.connectionRouteManager;
-        } else if (params.defaultConnectionRouteManagerType === 'basic') {
-            this.connectionRouteManager = new ConnectionRouteManagerBasic({diagramDesigner: this});
-        } else if (params.defaultConnectionRouteManagerType === 'basic2') {
-            this.connectionRouteManager = new ConnectionRouteManager2({diagramDesigner: this});
-        } else if (params.defaultConnectionRouteManagerType === 'basic3') {
-            this.connectionRouteManager = new ConnectionRouteManager3({diagramDesigner: this});
-        }
+        this.connectionRouteManager = new ConnectionRouteManagerBasic({diagramDesigner: this});
+        // if (params.connectionRouteManager) {
+        //     this.connectionRouteManager = params.connectionRouteManager;
+        // } else if (params.defaultConnectionRouteManagerType === 'basic') {
+        //     this.connectionRouteManager = new ConnectionRouteManagerBasic({diagramDesigner: this});
+        // } else if (params.defaultConnectionRouteManagerType === 'basic2') {
+        //     this.connectionRouteManager = new ConnectionRouteManager2({diagramDesigner: this});
+        // } else if (params.defaultConnectionRouteManagerType === 'basic3') {
+        //     this.connectionRouteManager = new ConnectionRouteManager3({diagramDesigner: this});
+        // }
 
         this.connectionRouteManager.initialize();
 
@@ -322,18 +326,22 @@ define([
         this._itemSubcomponentsMap = {};
 
         //reset item counter
-        this._itemIDCounter = 0;
+        //this._itemIDCounter = 0;
     };
 
     /*
      * Generated a new ID for the box/line (internal use only)
      */
     DiagramDesignerWidget.prototype._getGuid = function (prefix) {
-        var nextID = (this._itemIDCounter++) + '',
+        var nextID,
             len;
 
+        this._itemIDCounter = ( this._itemIDCounter % MAX_COMPONENT_ID ) + 1;
+
+        nextID = this._itemIDCounter + '';
+
         //padding 0s
-        len = GUID_DIGITS - nextID.length;
+        len = COMPONENT_ID_LENGTH - nextID.length;
         while (len--) {
             nextID = '0' + nextID;
         }
@@ -1167,7 +1175,7 @@ define([
                 this.connectionRouteManager = new ConnectionRouteManagerBasic({diagramDesigner: this});
                 break;
             case 'basic2':
-                this.connectionRouteManager = new ConnectionRouteManager2({diagramDesigner: this});
+                this.connectionRouteManager = new ConnectionRouteManager3Old({diagramDesigner: this});
                 break;
             case 'basic3':
                 this.connectionRouteManager = new ConnectionRouteManager3({diagramDesigner: this});

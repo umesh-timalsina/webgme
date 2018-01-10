@@ -51,6 +51,7 @@ require.config({
 
         //Other modules
         AutoRouterActionApplier: 'lib/autorouter/action-applier',
+        AutoRouterActionApplierOld: 'lib/autorouterOld/action-applier',
         underscore: 'bower_components/underscore/underscore',
         jszip: 'bower_components/jszip/dist/jszip',
         backbone: 'bower_components/backbone/backbone',
